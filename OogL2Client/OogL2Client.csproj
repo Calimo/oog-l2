@@ -12,4 +12,10 @@
     <PackageReference Include="BouncyCastle.Cryptography" Version="2.5.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="Maps\**\*.jpg">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
 </Project>

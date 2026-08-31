@@ -3,6 +3,7 @@ using Org.BouncyCastle.Crypto.Engines;
 using Org.BouncyCastle.Crypto.Parameters;
 using Org.BouncyCastle.Math;
 using OogL2Client.Models;
+using OogL2Client.World;
 
 namespace OogL2Client.Networking;
 
@@ -14,6 +15,7 @@ public enum ConnectionStage
 }
 
 public sealed record SessionStatus(ConnectionStage Stage, bool LoginAuthenticated, bool GameAuthenticated, bool InWorld);
+public sealed record PlayerLocationUpdate(int ObjectId, string Name, int X, int Y, int Z, int Heading, byte Opcode, string SourceSummary);
 
 public sealed class L2MobiusConnection : IDisposable
 {
@@ -42,11 +44,21 @@ public sealed class L2MobiusConnection : IDisposable
     private bool _pendingEnterWorldAfterCharSelected;
     private bool _loginAuthenticated;
     private bool _gameAuthenticated;
+    private IReadOnlyList<CharacterSelectionEntry> _lastCharacterEntries = Array.Empty<CharacterSelectionEntry>();
+    private int _selectedCharacterObjectId;
+    private string _selectedCharacterName = string.Empty;
+    private readonly WorldState _worldState = new();
+    private int? _lastSelfX;
+    private int? _lastSelfY;
+    private int? _lastSelfZ;
+    private int? _lastSelfHeading;
 
     public event Action<string>? MessageReceived;
     public event Action<IReadOnlyList<string>>? CharactersReceived;
     public event Action<IReadOnlyList<CharacterSelectionEntry>>? CharacterListReceived;
     public event Action<SessionStatus>? StatusChanged;
+    public event Action<WorldPacketApplyResult>? WorldStateUpdated;
+    public event Action<PlayerLocationUpdate>? PlayerLocationUpdated;
 
     public L2MobiusConnection(AccountProfile account)
     {
@@ -55,6 +67,7 @@ public sealed class L2MobiusConnection : IDisposable
 
     public bool IsConnected => _client.Connected && _stream is not null;
     public ConnectionStage Stage { get; private set; } = ConnectionStage.Disconnected;
+    public WorldState WorldState => _worldState;
 
     public Task ConnectAsync()
     {
@@ -101,7 +114,7 @@ public sealed class L2MobiusConnection : IDisposable
         StartReader();
     }
 
-    public async Task SendLoginRequestAsync()
+    public async Task SendLoginRequestAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -121,10 +134,10 @@ public sealed class L2MobiusConnection : IDisposable
         var clearBlock = L2MobiusPacketBuilder.BuildAuthLoginCredentialBlock(_account.Username, _account.Password);
         var encryptedBlock = EncryptRsaNoPadding(clearBlock, _rsaModulus);
         var payload = L2MobiusPacketBuilder.BuildAuthLoginPayload(encryptedBlock);
-        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false);
+        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false, cancellationToken);
     }
 
-    public async Task SendAuthGameGuardAsync()
+    public async Task SendAuthGameGuardAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -137,10 +150,10 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = L2MobiusPacketBuilder.BuildAuthGameGuardPayload(_sessionId);
-        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false);
+        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false, cancellationToken);
     }
 
-    public async Task SendRequestServerListAsync()
+    public async Task SendRequestServerListAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -148,10 +161,10 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = ExtractPayload(L2MobiusPacketBuilder.BuildRequestServerList(_loginKey1, _loginKey2));
-        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false);
+        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false, cancellationToken);
     }
 
-    public async Task SendSelectServerAsync()
+    public async Task SendSelectServerAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -159,10 +172,10 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = ExtractPayload(L2MobiusPacketBuilder.BuildRequestPlay(_account.ServerId, _loginKey1, _loginKey2));
-        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false);
+        await SendPayloadAsync(payload, encryptLogin: true, encryptGame: false, cancellationToken);
     }
 
-    public async Task SendGameAuthAsync()
+    public async Task SendGameAuthAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -176,10 +189,10 @@ public sealed class L2MobiusConnection : IDisposable
 
         _pendingGameAuth = true;
         var protocolPayload = ExtractPayload(L2MobiusPacketBuilder.BuildGameProtocolVersion(_account.ProtocolVersion));
-        await SendPayloadAsync(protocolPayload, encryptLogin: false, encryptGame: false);
+        await SendPayloadAsync(protocolPayload, encryptLogin: false, encryptGame: false, cancellationToken);
     }
 
-    public async Task SendSelectCharacterAsync(int slot)
+    public async Task SendSelectCharacterAsync(int slot, CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -187,12 +200,21 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = ExtractPayload(L2MobiusPacketBuilder.BuildGameCharacterSelect(slot));
-        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true);
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
         _pendingEnterWorldAfterCharSelected = true;
+
+        var selected = _lastCharacterEntries.FirstOrDefault(c => c.Slot == slot);
+        if (selected is not null)
+        {
+            _selectedCharacterObjectId = selected.ObjectId;
+            _selectedCharacterName = selected.Name;
+            EnsureSelfTrackerSeed();
+        }
+
         MessageReceived?.Invoke($"CharacterSelect sent for slot {slot}. Waiting for CharSelected before EnterWorld...");
     }
 
-    public async Task SendEnterWorldAsync()
+    public async Task SendEnterWorldAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -200,12 +222,100 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = ExtractPayload(L2MobiusPacketBuilder.BuildGameEnterWorld());
-        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true);
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
         _enterWorldSent = true;
         MessageReceived?.Invoke("EnterWorld sent. Waiting for in-game packet stream confirmation...");
     }
 
-    public async Task SendPingAsync()
+    public async Task SendMoveToLocationAsync(int x, int y, int z, int heading = 0, int originX = 0, int originY = 0, int originZ = 0, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildMoveToLocation(x, y, z, heading, originX, originY, originZ));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendStopMoveAsync(CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildStopMove());
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendAttackAsync(int targetObjectId, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAttack(targetObjectId));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendUseSkillAsync(int skillId, int targetObjectId, int ctrlPressed = 0, int shiftPressed = 0, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildUseSkill(skillId, targetObjectId, ctrlPressed, shiftPressed));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendUseItemAsync(int objectId, int itemId, int targetObjectId = 0, int itemCount = 1, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildUseItem(objectId, itemId, targetObjectId, itemCount));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendActionAsync(int targetObjectId, int actionId, int actionType = 0, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAction(targetObjectId, actionId, actionType));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendRequestTargetAsync(int targetObjectId, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildRequestTarget(targetObjectId));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendAssistTargetAsync(int targetObjectId, CancellationToken cancellationToken = default)
+    {
+        if (_stream is null)
+        {
+            throw new InvalidOperationException("Client is not connected.");
+        }
+
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAssistTarget(targetObjectId));
+        await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
+    }
+
+    public async Task SendPingAsync(CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
@@ -213,21 +323,21 @@ public sealed class L2MobiusConnection : IDisposable
         }
 
         var payload = ExtractPayload(L2MobiusPacketBuilder.BuildPingPacket());
-        await SendPayloadAsync(payload, encryptLogin: Stage == ConnectionStage.LoginConnected, encryptGame: Stage == ConnectionStage.GameConnected);
+        await SendPayloadAsync(payload, encryptLogin: Stage == ConnectionStage.LoginConnected, encryptGame: Stage == ConnectionStage.GameConnected, cancellationToken);
     }
 
-    public async Task SendAsync(byte[] packet)
+    public async Task SendAsync(byte[] packet, CancellationToken cancellationToken = default)
     {
         if (_stream is null)
         {
             throw new InvalidOperationException("Stream not initialized.");
         }
 
-        await _stream.WriteAsync(packet.AsMemory(0, packet.Length), _cts.Token);
+        await _stream.WriteAsync(packet.AsMemory(0, packet.Length), cancellationToken == default ? _cts.Token : cancellationToken);
         MessageReceived?.Invoke($"Sent ({packet.Length} bytes): {Convert.ToHexString(packet)}");
     }
 
-    private async Task SendPayloadAsync(byte[] payload, bool encryptLogin, bool encryptGame)
+    private async Task SendPayloadAsync(byte[] payload, bool encryptLogin, bool encryptGame, CancellationToken cancellationToken = default)
     {
         byte[] wirePayload = payload;
 
@@ -240,7 +350,7 @@ public sealed class L2MobiusConnection : IDisposable
             wirePayload = _gameCrypt.Encrypt(payload);
         }
 
-        await SendAsync(L2MobiusPacketBuilder.BuildPacket(wirePayload));
+        await SendAsync(L2MobiusPacketBuilder.BuildPacket(wirePayload), cancellationToken);
     }
 
     private void StartReader()
@@ -381,7 +491,7 @@ public sealed class L2MobiusConnection : IDisposable
                     _loginCrypt.SetSessionKey(blowfishKey);
                     _loginInitReceived = true;
                     MessageReceived?.Invoke($"Login Init received. SessionId={_sessionId}. Sending AuthGameGuard...");
-                    QueueSend(SendAuthGameGuardAsync, "AuthGameGuard");
+                    QueueSend(() => SendAuthGameGuardAsync(), "AuthGameGuard");
                 }
                 else
                 {
@@ -390,7 +500,7 @@ public sealed class L2MobiusConnection : IDisposable
                 break;
             case 0x0B: // GG_AUTH
                 MessageReceived?.Invoke("GG_AUTH received. Sending RequestAuthLogin...");
-                QueueSend(SendLoginRequestAsync, "AuthLogin");
+                QueueSend(() => SendLoginRequestAsync(), "AuthLogin");
                 break;
             case 0x03: // LOGIN_OK
                 if (payload.Length >= 9)
@@ -400,7 +510,7 @@ public sealed class L2MobiusConnection : IDisposable
                     _loginAuthenticated = true;
                     PublishStatus();
                     MessageReceived?.Invoke($"Login OK. LoginKeys=({_loginKey1}, {_loginKey2}). Requesting server list...");
-                    QueueSend(SendRequestServerListAsync, "RequestServerList");
+                    QueueSend(() => SendRequestServerListAsync(), "RequestServerList");
                 }
                 break;
             case 0x04: // SERVER_LIST
@@ -419,7 +529,7 @@ public sealed class L2MobiusConnection : IDisposable
                     MessageReceived?.Invoke($"Configured ServerId {oldId} not present. Using ServerId {_account.ServerId} from ServerList.");
                 }
 
-                QueueSend(SendSelectServerAsync, "RequestServerLogin");
+                QueueSend(() => SendSelectServerAsync(), "RequestServerLogin");
                 break;
             case 0x07: // PLAY_OK
                 if (payload.Length >= 9)
@@ -459,6 +569,15 @@ public sealed class L2MobiusConnection : IDisposable
                 }
 
                 _gameAuthenticated = true;
+                _lastCharacterEntries = characters;
+                var active = characters.FirstOrDefault(c => c.IsActive) ?? characters.FirstOrDefault();
+                if (active is not null)
+                {
+                    _selectedCharacterObjectId = active.ObjectId;
+                    _selectedCharacterName = active.Name;
+                    EnsureSelfTrackerSeed();
+                }
+
                 PublishStatus();
                 CharacterListReceived?.Invoke(characters);
                 var labels = characters.Select(c => $"{c.Slot}:{c.Name} (Lv {c.Level}, Class {c.ClassId})").ToList();
@@ -474,7 +593,7 @@ public sealed class L2MobiusConnection : IDisposable
         if (opcode == 0x15 && _pendingEnterWorldAfterCharSelected)
         {
             _pendingEnterWorldAfterCharSelected = false;
-            QueueSend(SendEnterWorldAsync, "EnterWorld");
+            QueueSend(() => SendEnterWorldAsync(), "EnterWorld");
             MessageReceived?.Invoke("CharSelected received. Sending EnterWorld now.");
         }
 
@@ -483,6 +602,22 @@ public sealed class L2MobiusConnection : IDisposable
             _worldEnteredConfirmed = true;
             PublishStatus();
             MessageReceived?.Invoke($"World entry confirmed by server packet 0x{opcode:X2}. Character is in-game server-side.");
+        }
+
+        if (WorldPacketParser.TryApply(_worldState, opcode, payload, _selectedCharacterObjectId, _selectedCharacterName, out var update) && update.Changed)
+        {
+            PromoteSelectedCharacterToSelfIfNeeded();
+            WorldStateUpdated?.Invoke(update);
+            PublishPlayerLocationIfChanged(opcode, update.Summary);
+            if (update.ThreatChanged)
+            {
+                var self = _worldState.Self;
+                if (self is not null)
+                {
+                    var threatCount = _worldState.ThreatsTargeting(self.ObjectId).Count();
+                    MessageReceived?.Invoke($"Threat refresh: {threatCount} hostile target(s) currently focused on {self.Name} ({self.ObjectId}).");
+                }
+            }
         }
     }
 
@@ -600,6 +735,83 @@ public sealed class L2MobiusConnection : IDisposable
         _pendingEnterWorldAfterCharSelected = false;
         _loginAuthenticated = false;
         _gameAuthenticated = false;
+        _lastCharacterEntries = Array.Empty<CharacterSelectionEntry>();
+        _selectedCharacterObjectId = 0;
+        _selectedCharacterName = string.Empty;
+        _worldState.Clear();
+        _lastSelfX = null;
+        _lastSelfY = null;
+        _lastSelfZ = null;
+        _lastSelfHeading = null;
+    }
+
+    private void PromoteSelectedCharacterToSelfIfNeeded()
+    {
+        if (_worldState.Self is not null)
+        {
+            return;
+        }
+
+        if (_selectedCharacterObjectId <= 0)
+        {
+            return;
+        }
+
+        var selected = _worldState.Get(_selectedCharacterObjectId);
+        if (selected is null)
+        {
+            return;
+        }
+
+        selected.Name = string.IsNullOrWhiteSpace(selected.Name) ? _selectedCharacterName : selected.Name;
+        selected.Type = WorldObjectType.Player;
+        selected.Relation = WorldObjectRelation.Self;
+        _worldState.SetSelf(selected);
+        MessageReceived?.Invoke($"Self tracker attached to object {_selectedCharacterObjectId} ({selected.Name}).");
+    }
+
+    private void EnsureSelfTrackerSeed()
+    {
+        if (_worldState.Self is not null || _selectedCharacterObjectId <= 0)
+        {
+            return;
+        }
+
+        var placeholder = new WorldObject
+        {
+            ObjectId = _selectedCharacterObjectId,
+            Name = string.IsNullOrWhiteSpace(_selectedCharacterName) ? $"Player {_selectedCharacterObjectId}" : _selectedCharacterName,
+            Type = WorldObjectType.Player,
+            Relation = WorldObjectRelation.Self,
+            IsVisible = true,
+            LastSeenUtc = DateTime.UtcNow
+        };
+
+        _worldState.SetSelf(placeholder);
+        MessageReceived?.Invoke($"Self tracker seeded with character object {_selectedCharacterObjectId} ({placeholder.Name}). Waiting for world position packets...");
+        PublishPlayerLocationIfChanged(0x00, "Self tracker seeded from character selection.");
+    }
+
+    private void PublishPlayerLocationIfChanged(byte opcode, string sourceSummary)
+    {
+        var self = _worldState.Self;
+        if (self is null)
+        {
+            return;
+        }
+
+        var changed = !_lastSelfX.HasValue || !_lastSelfY.HasValue || !_lastSelfZ.HasValue || !_lastSelfHeading.HasValue ||
+                      _lastSelfX.Value != self.X || _lastSelfY.Value != self.Y || _lastSelfZ.Value != self.Z || _lastSelfHeading.Value != self.Heading;
+        if (!changed)
+        {
+            return;
+        }
+
+        _lastSelfX = self.X;
+        _lastSelfY = self.Y;
+        _lastSelfZ = self.Z;
+        _lastSelfHeading = self.Heading;
+        PlayerLocationUpdated?.Invoke(new PlayerLocationUpdate(self.ObjectId, self.Name, self.X, self.Y, self.Z, self.Heading, opcode, sourceSummary));
     }
 
     private void PublishStatus()

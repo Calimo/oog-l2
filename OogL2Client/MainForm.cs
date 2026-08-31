@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using OogL2Client.Models;
 using OogL2Client.Networking;
+using OogL2Client.World;
 
 namespace OogL2Client;
 
@@ -16,6 +17,14 @@ public sealed class MainForm : Form
     private readonly TextBox _usernameText;
     private readonly TextBox _passwordText;
     private readonly TextBox _serverIdText;
+    private readonly TextBox _moveXText;
+    private readonly TextBox _moveYText;
+    private readonly TextBox _moveZText;
+    private readonly TextBox _targetIdText;
+    private readonly TextBox _skillIdText;
+    private readonly TextBox _itemIdText;
+    private readonly TextBox _itemObjectText;
+    private readonly TextBox _actionIdText;
     private readonly ListBox _accountList;
     private readonly RichTextBox _logText;
     private readonly Button _addAccountButton;
@@ -23,14 +32,31 @@ public sealed class MainForm : Form
     private readonly Button _listCharactersButton;
     private readonly Button _enterGameButton;
     private readonly Button _disconnectButton;
+    private readonly Button _moveDebugButton;
+    private readonly Button _stopMoveDebugButton;
+    private readonly Button _attackDebugButton;
+    private readonly Button _skillDebugButton;
+    private readonly Button _useItemDebugButton;
+    private readonly Button _targetDebugButton;
+    private readonly Button _assistDebugButton;
     private readonly ComboBox _characterCombo;
     private readonly Label _loginStateLabel;
     private readonly Label _gameStateLabel;
     private readonly Label _worldStateLabel;
+    private readonly Label _playerLocationLabel;
+    private readonly Label _playerLocationMetaLabel;
+    private readonly PictureBox _minimapBox;
+    private readonly SplitContainer _worldPanel;
+    private readonly WorldState _worldState = new();
+    private readonly MinimapRenderer _minimapRenderer;
     private L2MobiusConnection? _session;
+    private string _lastThreatSummary = string.Empty;
 
     public MainForm()
     {
+        var mapsDirectory = ResolveMapsDirectory();
+        _minimapRenderer = new MinimapRenderer(mapsDirectory);
+
         Text = "OOG L2 Client";
         Size = new Size(1000, 700);
         StartPosition = FormStartPosition.CenterScreen;
@@ -127,6 +153,15 @@ public sealed class MainForm : Form
 
         var rightPanel = new Panel { Dock = DockStyle.Fill, BackColor = BackColor };
 
+        _minimapBox = new PictureBox
+        {
+            Dock = DockStyle.Fill,
+            BackColor = Color.Black,
+            BorderStyle = BorderStyle.FixedSingle,
+            SizeMode = PictureBoxSizeMode.StretchImage,
+            Margin = new Padding(0)
+        };
+
         _logText = new RichTextBox
         {
             ReadOnly = true,
@@ -136,6 +171,22 @@ public sealed class MainForm : Form
             Font = new Font(FontFamily.GenericMonospace, 10f),
             BorderStyle = BorderStyle.FixedSingle
         };
+
+        _worldPanel = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            BackColor = BackColor,
+            SplitterWidth = 8,
+            FixedPanel = FixedPanel.None,
+            Panel2MinSize = 120
+        };
+        _worldPanel.Panel1.BackColor = BackColor;
+        _worldPanel.Panel2.BackColor = BackColor;
+        _worldPanel.Panel1.Controls.Add(_logText);
+        _worldPanel.Panel2.Controls.Add(_minimapBox);
+        _worldPanel.Resize += (_, _) => ConfigureWorldPanelSplit();
+        Shown += (_, _) => ConfigureWorldPanelSplit();
 
         var buttonPanel = new FlowLayoutPanel
         {
@@ -180,20 +231,142 @@ public sealed class MainForm : Form
         statusPanel.Controls.Add(_gameStateLabel);
         statusPanel.Controls.Add(_worldStateLabel);
 
-        rightPanel.Controls.Add(_logText);
+        var locationPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 42,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
+            Padding = new Padding(0, 0, 0, 4)
+        };
+
+        _playerLocationLabel = new Label
+        {
+            AutoSize = true,
+            ForeColor = Color.LightSkyBlue,
+            Font = new Font(FontFamily.GenericMonospace, 10f, FontStyle.Bold),
+            Text = "Player: waiting for packets..."
+        };
+        _playerLocationMetaLabel = new Label
+        {
+            AutoSize = true,
+            ForeColor = Color.LightGray,
+            Font = new Font(FontFamily.GenericMonospace, 8f),
+            Text = "Source: n/a"
+        };
+        locationPanel.Controls.Add(_playerLocationLabel);
+        locationPanel.Controls.Add(_playerLocationMetaLabel);
+
+        _moveXText = new TextBox { Width = 70, Text = "150000" };
+        _moveYText = new TextBox { Width = 70, Text = "150000" };
+        _moveZText = new TextBox { Width = 70, Text = "0" };
+        _targetIdText = new TextBox { Width = 80, Text = "0" };
+        _skillIdText = new TextBox { Width = 80, Text = "1001" };
+        _itemIdText = new TextBox { Width = 80, Text = "57" };
+        _itemObjectText = new TextBox { Width = 80, Text = "0" };
+        _actionIdText = new TextBox { Width = 80, Text = "0" };
+
+        var debugPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            AutoSize = true,
+            WrapContents = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            Padding = new Padding(0, 8, 0, 8)
+        };
+
+        debugPanel.Controls.Add(CreateDebugField("X", _moveXText));
+        debugPanel.Controls.Add(CreateDebugField("Y", _moveYText));
+        debugPanel.Controls.Add(CreateDebugField("Z", _moveZText));
+        debugPanel.Controls.Add(CreateDebugField("Target", _targetIdText));
+        debugPanel.Controls.Add(CreateDebugField("Skill", _skillIdText));
+        debugPanel.Controls.Add(CreateDebugField("Item", _itemIdText));
+        debugPanel.Controls.Add(CreateDebugField("ItemObj", _itemObjectText));
+        debugPanel.Controls.Add(CreateDebugField("Action", _actionIdText));
+
+        _moveDebugButton = new Button { Text = "Move", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+        _stopMoveDebugButton = new Button { Text = "Stop", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+        _attackDebugButton = new Button { Text = "Attack", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+        _skillDebugButton = new Button { Text = "Skill", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+        _useItemDebugButton = new Button { Text = "Use Item", Width = 96, Margin = new Padding(0, 0, 6, 0) };
+        _targetDebugButton = new Button { Text = "Target", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+        _assistDebugButton = new Button { Text = "Assist", Width = 90, Margin = new Padding(0, 0, 6, 0) };
+
+        _moveDebugButton.Click += MoveDebugButton_Click;
+        _stopMoveDebugButton.Click += StopMoveDebugButton_Click;
+        _attackDebugButton.Click += AttackDebugButton_Click;
+        _skillDebugButton.Click += SkillDebugButton_Click;
+        _useItemDebugButton.Click += UseItemDebugButton_Click;
+        _targetDebugButton.Click += TargetDebugButton_Click;
+        _assistDebugButton.Click += AssistDebugButton_Click;
+
+        debugPanel.Controls.Add(_moveDebugButton);
+        debugPanel.Controls.Add(_stopMoveDebugButton);
+        debugPanel.Controls.Add(_attackDebugButton);
+        debugPanel.Controls.Add(_skillDebugButton);
+        debugPanel.Controls.Add(_useItemDebugButton);
+        debugPanel.Controls.Add(_targetDebugButton);
+        debugPanel.Controls.Add(_assistDebugButton);
+
+        rightPanel.Controls.Add(_worldPanel);
+        rightPanel.Controls.Add(locationPanel);
         rightPanel.Controls.Add(statusPanel);
+        rightPanel.Controls.Add(debugPanel);
         rightPanel.Controls.Add(buttonPanel);
         statusPanel.BringToFront();
+        debugPanel.BringToFront();
         buttonPanel.BringToFront();
 
         table.Controls.Add(leftPanel, 0, 0);
         table.Controls.Add(rightPanel, 1, 0);
         Controls.Add(table);
 
+        SeedExampleWorld();
+        RefreshMinimap();
+
         AppendLog("OOG L2 Client ready.");
+        AppendLog($"Minimap maps source: {mapsDirectory}");
         AppendLog("This is a protocol-learning shell for a private L2J Mobius server.");
         AppendLog("Protocol default is 746. Add account, click Connect, then List Characters.");
         UpdateStatus(new SessionStatus(ConnectionStage.Disconnected, false, false, false));
+    }
+
+    private static string ResolveMapsDirectory()
+    {
+        var localRuntimePath = Path.Combine(AppContext.BaseDirectory, "Maps");
+        if (Directory.Exists(localRuntimePath))
+        {
+            return localRuntimePath;
+        }
+
+        var localProjectPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "OogL2Client", "Maps");
+        var fullProjectPath = Path.GetFullPath(localProjectPath);
+        if (Directory.Exists(fullProjectPath))
+        {
+            return fullProjectPath;
+        }
+
+        return @"D:\L2Adrenaline\Maps";
+    }
+
+    private void ConfigureWorldPanelSplit()
+    {
+        var width = _worldPanel.Width;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        var minDistance = _worldPanel.Panel1MinSize;
+        var maxDistance = width - _worldPanel.Panel2MinSize;
+        if (maxDistance <= minDistance)
+        {
+            return;
+        }
+
+        var desiredDistance = (int)(width * 0.58f);
+        var splitDistance = Math.Clamp(desiredDistance, minDistance, maxDistance);
+        _worldPanel.SplitterDistance = splitDistance;
     }
 
     private static Label CreateStatusLabel(string text)
@@ -222,6 +395,25 @@ public sealed class MainForm : Form
             Anchor = AnchorStyles.Left,
             ForeColor = Color.White,
             Margin = new Padding(0, 7, 8, 0)
+        };
+
+        panel.Controls.Add(label, 0, 0);
+        panel.Controls.Add(input, 1, 0);
+        return panel;
+    }
+
+    private static Control CreateDebugField(string labelText, Control input)
+    {
+        var panel = new TableLayoutPanel { ColumnCount = 2, RowCount = 1, AutoSize = true, Margin = new Padding(0, 0, 6, 0) };
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 42F));
+        panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        var label = new Label
+        {
+            Text = labelText,
+            AutoSize = true,
+            ForeColor = Color.White,
+            Margin = new Padding(0, 5, 4, 0)
         };
 
         panel.Controls.Add(label, 0, 0);
@@ -268,9 +460,55 @@ public sealed class MainForm : Form
             _session.CharactersReceived += names => AppendLog($"Character candidates: {string.Join(", ", names)}");
             _session.CharacterListReceived += OnCharacterListReceived;
             _session.StatusChanged += UpdateStatus;
+            _session.WorldStateUpdated += OnWorldStateUpdated;
+            _session.PlayerLocationUpdated += OnPlayerLocationUpdated;
         }
 
         return _session;
+    }
+
+    private void OnWorldStateUpdated(WorldPacketApplyResult update)
+    {
+        RefreshMinimap();
+
+        if (!update.ThreatChanged || _session is null)
+        {
+            return;
+        }
+
+        var self = _session.WorldState.Self;
+        if (self is null)
+        {
+            return;
+        }
+
+        var threats = _session.WorldState
+            .ThreatsTargeting(self.ObjectId)
+            .Select(t => $"{t.Name}({t.ObjectId})")
+            .Take(5)
+            .ToList();
+
+        var summary = threats.Count == 0
+            ? "No current threats on self."
+            : $"Threats on self: {string.Join(", ", threats)}";
+
+        if (!string.Equals(summary, _lastThreatSummary, StringComparison.Ordinal))
+        {
+            _lastThreatSummary = summary;
+            AppendLog(summary);
+        }
+    }
+
+    private void OnPlayerLocationUpdated(PlayerLocationUpdate update)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action<PlayerLocationUpdate>(OnPlayerLocationUpdated), update);
+            return;
+        }
+
+        _playerLocationLabel.Text = $"Player {update.Name} ({update.ObjectId}) X:{update.X} Y:{update.Y} Z:{update.Z} H:{update.Heading}";
+        _playerLocationMetaLabel.Text = $"Source: 0x{update.Opcode:X2} {update.SourceSummary}";
     }
 
     private void OnCharacterListReceived(IReadOnlyList<CharacterSelectionEntry> characters)
@@ -333,6 +571,71 @@ public sealed class MainForm : Form
     {
         label.Text = $"{title}: {(isOn ? "ON" : "OFF")}";
         label.ForeColor = isOn ? Color.LawnGreen : Color.LightGray;
+    }
+
+    private void SeedExampleWorld()
+    {
+        _worldState.Clear();
+        _worldState.SetSelf(new WorldObject
+        {
+            ObjectId = 1,
+            Name = "Self",
+            Type = WorldObjectType.Player,
+            // Region 14_24 has detailed map content in this map pack.
+            X = -196608,
+            Y = 196608,
+            Z = 0,
+            IsAlive = true,
+            Relation = WorldObjectRelation.Self,
+            IsVisible = true,
+            LastSeenUtc = DateTime.UtcNow
+        });
+
+        var offsets = new[]
+        {
+            (1000, 200, WorldObjectType.Monster, "Wolf"),
+            (-800, 1500, WorldObjectType.Monster, "Skeleton"),
+            (1500, -700, WorldObjectType.Player, "Ally"),
+            (-1200, -900, WorldObjectType.NPC, "Merchant"),
+            (700, 1200, WorldObjectType.Item, "Herb")
+        };
+
+        for (var i = 0; i < offsets.Length; i++)
+        {
+            var (dx, dy, type, name) = offsets[i];
+            _worldState.Upsert(new WorldObject
+            {
+                ObjectId = 100 + i,
+                Name = name,
+                Type = type,
+                X = -196608 + dx,
+                Y = 196608 + dy,
+                Z = 0,
+                IsAlive = true,
+                IsVisible = true,
+                Relation = type == WorldObjectType.Monster ? WorldObjectRelation.Enemy : type == WorldObjectType.Player ? WorldObjectRelation.Friendly : WorldObjectRelation.Neutral,
+                LastSeenUtc = DateTime.UtcNow
+            });
+        }
+    }
+
+    private void RefreshMinimap()
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action(RefreshMinimap));
+            return;
+        }
+
+        var activeWorld = _session?.WorldState ?? _worldState;
+        var self = activeWorld.Self;
+        if (self is null)
+        {
+            return;
+        }
+
+        var image = _minimapRenderer.Render(activeWorld, self.X, self.Y, _minimapBox.Width, _minimapBox.Height, 2500);
+        _minimapBox.Image = image;
     }
 
     private async void ConnectButton_Click(object? sender, EventArgs e)
@@ -408,12 +711,125 @@ public sealed class MainForm : Form
         }
     }
 
+    private async void MoveDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var x = TryParseInt(_moveXText.Text, 150000);
+        var y = TryParseInt(_moveYText.Text, 150000);
+        var z = TryParseInt(_moveZText.Text, 0);
+
+        await session.SendMoveToLocationAsync(x, y, z);
+        AppendLog($"Move request sent: X={x}, Y={y}, Z={z}.");
+    }
+
+    private async void StopMoveDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        await session.SendStopMoveAsync();
+        AppendLog("StopMove sent.");
+    }
+
+    private async void AttackDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var targetId = TryParseInt(_targetIdText.Text, 0);
+        await session.SendAttackAsync(targetId);
+        AppendLog($"Attack sent to target {targetId}.");
+    }
+
+    private async void SkillDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var targetId = TryParseInt(_targetIdText.Text, 0);
+        var skillId = TryParseInt(_skillIdText.Text, 1001);
+        await session.SendUseSkillAsync(skillId, targetId);
+        AppendLog($"Skill {skillId} cast on target {targetId}.");
+    }
+
+    private async void UseItemDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var itemId = TryParseInt(_itemIdText.Text, 57);
+        var itemObjectId = TryParseInt(_itemObjectText.Text, 0);
+        var targetId = TryParseInt(_targetIdText.Text, 0);
+        await session.SendUseItemAsync(itemObjectId, itemId, targetId, 1);
+        AppendLog($"Item {itemId} used from object {itemObjectId} on target {targetId}.");
+    }
+
+    private async void TargetDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var targetId = TryParseInt(_targetIdText.Text, 0);
+        await session.SendRequestTargetAsync(targetId);
+        AppendLog($"Target request sent for object {targetId}.");
+    }
+
+    private async void AssistDebugButton_Click(object? sender, EventArgs e)
+    {
+        if (_accountList.SelectedItem is not AccountProfile selected)
+        {
+            AppendLog("Pick an account first.");
+            return;
+        }
+
+        var session = GetOrCreateSession(selected);
+        var targetId = TryParseInt(_targetIdText.Text, 0);
+        await session.SendAssistTargetAsync(targetId);
+        AppendLog($"Assist target request sent for object {targetId}.");
+    }
+
     private void DisconnectButton_Click(object? sender, EventArgs e)
     {
         _session?.Dispose();
         _session = null;
         _characters.Clear();
+        _lastThreatSummary = string.Empty;
+        _playerLocationLabel.Text = "Player: waiting for packets...";
+        _playerLocationMetaLabel.Text = "Source: n/a";
+        SeedExampleWorld();
+        RefreshMinimap();
         AppendLog("Session disconnected.");
+    }
+
+    private static int TryParseInt(string value, int fallback)
+    {
+        return int.TryParse(value, out var parsed) ? parsed : fallback;
     }
 
     private void AppendLog(string message)

@@ -16,6 +16,16 @@ public static class L2MobiusPacketBuilder
     public const byte GameEnterWorldOpcode = 0x03;
     public const byte GameCharacterSelectOpcode = 0x0D;
 
+    // Common in-game interaction opcodes used by L2-style clients.
+    public const byte MoveToLocationOpcode = 0x01;
+    public const byte AttackOpcode = 0x02;
+    public const byte UseSkillOpcode = 0x0A;
+    public const byte UseItemOpcode = 0x12;
+    public const byte ActionOpcode = 0x15;
+    public const byte RequestTargetOpcode = 0x18;
+    public const byte AssistTargetOpcode = 0x1C;
+    public const byte StopMoveOpcode = 0x1E;
+
     // Incoming key packet / char select info for logging/parsing.
     public const byte KeyPacketOpcode = 0x00;
     public const byte CharSelectInfoOpcode = 0x13;
@@ -136,9 +146,60 @@ public static class L2MobiusPacketBuilder
         return BuildPacket(body.ToArray());
     }
 
+    public static byte[] BuildMoveToLocation(int x, int y, int z, int heading = 0, int originX = 0, int originY = 0, int originZ = 0)
+    {
+        return BuildGameInteractionPacket(MoveToLocationOpcode, x, y, z, heading, originX, originY, originZ);
+    }
+
+    public static byte[] BuildStopMove()
+    {
+        return BuildGameInteractionPacket(StopMoveOpcode, 0);
+    }
+
+    public static byte[] BuildAttack(int targetObjectId)
+    {
+        return BuildGameInteractionPacket(AttackOpcode, targetObjectId, 0, 0, 0);
+    }
+
+    public static byte[] BuildUseSkill(int skillId, int targetObjectId, int ctrlPressed = 0, int shiftPressed = 0)
+    {
+        return BuildGameInteractionPacket(UseSkillOpcode, skillId, targetObjectId, ctrlPressed, shiftPressed, 0, 0);
+    }
+
+    public static byte[] BuildUseItem(int objectId, int itemId, int targetObjectId = 0, int itemCount = 1)
+    {
+        return BuildGameInteractionPacket(UseItemOpcode, objectId, itemId, targetObjectId, itemCount, 0, 0);
+    }
+
+    public static byte[] BuildAction(int targetObjectId, int actionId, int actionType = 0)
+    {
+        return BuildGameInteractionPacket(ActionOpcode, targetObjectId, actionId, actionType, 0, 0, 0);
+    }
+
+    public static byte[] BuildRequestTarget(int targetObjectId)
+    {
+        return BuildGameInteractionPacket(RequestTargetOpcode, targetObjectId, 0, 0, 0);
+    }
+
+    public static byte[] BuildAssistTarget(int targetObjectId)
+    {
+        return BuildGameInteractionPacket(AssistTargetOpcode, targetObjectId, 0, 0, 0);
+    }
+
     public static byte[] BuildPingPacket()
     {
         return BuildPacket(new[] { PingOpcode });
+    }
+
+    public static byte[] BuildGameInteractionPacket(byte opcode, params int[] values)
+    {
+        var body = new List<byte> { opcode };
+        foreach (var value in values)
+        {
+            body.AddRange(BitConverter.GetBytes(value));
+        }
+
+        return BuildPacket(body.ToArray());
     }
 
     public static byte[] BuildPacket(byte[] body)
