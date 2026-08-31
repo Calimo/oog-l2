@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "dgSpecHash": "5fVqYrKIHVo=",
+  "dgSpecHash": "EjXP1GxcGPA=",
   "success": true,
   "projectFilePath": "E:\\Projetos Git\\oog-l2\\OogL2Client\\OogL2Client.csproj",
-  "expectedPackageFiles": [],
+  "expectedPackageFiles": [
+    "C:\\Users\\Lucas Gratz\\.nuget\\packages\\bouncycastle.cryptography\\2.5.0\\bouncycastle.cryptography.2.5.0.nupkg.sha512"
+  ],
   "logs": []
 }

@@ -13,3 +13,6 @@ E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\refint\OogL2Client.d
 E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\OogL2Client.pdb
 E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\OogL2Client.genruntimeconfig.cache
 E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\ref\OogL2Client.dll
+E:\Projetos Git\oog-l2\OogL2Client\bin\Debug\net8.0-windows\BouncyCastle.Cryptography.dll
+E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\OogL2Client.csproj.AssemblyReference.cache
+E:\Projetos Git\oog-l2\OogL2Client\obj\Debug\net8.0-windows\OogL2Cli.68EFD475.Up2Date

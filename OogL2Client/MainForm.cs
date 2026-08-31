@@ -7,8 +7,12 @@ namespace OogL2Client;
 public sealed class MainForm : Form
 {
     private readonly BindingList<AccountProfile> _accounts = new();
+    private readonly BindingList<CharacterSelectionEntry> _characters = new();
     private readonly TextBox _serverHostText;
     private readonly TextBox _loginPortText;
+    private readonly TextBox _gamePortText;
+    private readonly TextBox _protocolText;
+    private readonly TextBox _characterSlotText;
     private readonly TextBox _usernameText;
     private readonly TextBox _passwordText;
     private readonly TextBox _serverIdText;
@@ -16,8 +20,14 @@ public sealed class MainForm : Form
     private readonly RichTextBox _logText;
     private readonly Button _addAccountButton;
     private readonly Button _connectButton;
-    private readonly Button _pingButton;
-    private readonly Button _selectServerButton;
+    private readonly Button _listCharactersButton;
+    private readonly Button _enterGameButton;
+    private readonly Button _disconnectButton;
+    private readonly ComboBox _characterCombo;
+    private readonly Label _loginStateLabel;
+    private readonly Label _gameStateLabel;
+    private readonly Label _worldStateLabel;
+    private L2MobiusConnection? _session;
 
     public MainForm()
     {
@@ -63,7 +73,10 @@ public sealed class MainForm : Form
         _passwordText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), UseSystemPasswordChar = true };
         _serverHostText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "127.0.0.1" };
         _loginPortText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "2106" };
+        _gamePortText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "7777" };
         _serverIdText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "1" };
+        _protocolText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "746" };
+        _characterSlotText = new TextBox { Width = 260, Margin = new Padding(0, 5, 0, 5), Text = "0" };
 
         var accountFields = new[]
         {
@@ -71,7 +84,10 @@ public sealed class MainForm : Form
             CreateField("Password", _passwordText),
             CreateField("Login Server", _serverHostText),
             CreateField("Login Port", _loginPortText),
-            CreateField("Server ID", _serverIdText)
+            CreateField("Game Port", _gamePortText),
+            CreateField("Server ID", _serverIdText),
+            CreateField("Protocol", _protocolText),
+            CreateField("Character Slot", _characterSlotText)
         };
 
         foreach (var box in accountFields)
@@ -98,6 +114,17 @@ public sealed class MainForm : Form
         };
         leftPanel.Controls.Add(_accountList);
 
+        _characterCombo = new ComboBox
+        {
+            Width = 260,
+            DropDownStyle = ComboBoxStyle.DropDownList,
+            Margin = new Padding(0, 10, 0, 0),
+            DataSource = _characters,
+            DisplayMember = nameof(CharacterSelectionEntry.Name)
+        };
+        _characterCombo.SelectedIndexChanged += CharacterCombo_SelectedIndexChanged;
+        leftPanel.Controls.Add(CreateField("Character", _characterCombo));
+
         var rightPanel = new Panel { Dock = DockStyle.Fill, BackColor = BackColor };
 
         _logText = new RichTextBox
@@ -123,18 +150,40 @@ public sealed class MainForm : Form
         _connectButton = new Button { Text = "Connect", Width = 120, Margin = new Padding(0, 0, 8, 0) };
         _connectButton.Click += ConnectButton_Click;
 
-        _pingButton = new Button { Text = "Ping", Width = 120, Margin = new Padding(0, 0, 8, 0) };
-        _pingButton.Click += PingButton_Click;
+        _listCharactersButton = new Button { Text = "List Characters", Width = 140, Margin = new Padding(0, 0, 8, 0) };
+        _listCharactersButton.Click += ListCharactersButton_Click;
 
-        _selectServerButton = new Button { Text = "Select Server", Width = 140 };
-        _selectServerButton.Click += SelectServerButton_Click;
+        _enterGameButton = new Button { Text = "Enter Game", Width = 120, Margin = new Padding(0, 0, 8, 0) };
+        _enterGameButton.Click += EnterGameButton_Click;
+
+        _disconnectButton = new Button { Text = "Disconnect", Width = 120 };
+        _disconnectButton.Click += DisconnectButton_Click;
 
         buttonPanel.Controls.Add(_connectButton);
-        buttonPanel.Controls.Add(_pingButton);
-        buttonPanel.Controls.Add(_selectServerButton);
+        buttonPanel.Controls.Add(_listCharactersButton);
+        buttonPanel.Controls.Add(_enterGameButton);
+        buttonPanel.Controls.Add(_disconnectButton);
+
+        var statusPanel = new FlowLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 34,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Padding = new Padding(0, 0, 0, 6)
+        };
+
+        _loginStateLabel = CreateStatusLabel("Login: OFF");
+        _gameStateLabel = CreateStatusLabel("Game: OFF");
+        _worldStateLabel = CreateStatusLabel("World: OFF");
+        statusPanel.Controls.Add(_loginStateLabel);
+        statusPanel.Controls.Add(_gameStateLabel);
+        statusPanel.Controls.Add(_worldStateLabel);
 
         rightPanel.Controls.Add(_logText);
+        rightPanel.Controls.Add(statusPanel);
         rightPanel.Controls.Add(buttonPanel);
+        statusPanel.BringToFront();
         buttonPanel.BringToFront();
 
         table.Controls.Add(leftPanel, 0, 0);
@@ -143,7 +192,21 @@ public sealed class MainForm : Form
 
         AppendLog("OOG L2 Client ready.");
         AppendLog("This is a protocol-learning shell for a private L2J Mobius server.");
-        AppendLog("Configure the login data and click Connect.");
+        AppendLog("Protocol default is 746. Add account, click Connect, then List Characters.");
+        UpdateStatus(new SessionStatus(ConnectionStage.Disconnected, false, false, false));
+    }
+
+    private static Label CreateStatusLabel(string text)
+    {
+        return new Label
+        {
+            Text = text,
+            AutoSize = true,
+            ForeColor = Color.LightGray,
+            BorderStyle = BorderStyle.FixedSingle,
+            Padding = new Padding(6, 4, 6, 4),
+            Margin = new Padding(0, 0, 8, 0)
+        };
     }
 
     private static Control CreateField(string labelText, Control input)
@@ -182,7 +245,11 @@ public sealed class MainForm : Form
             Password = password,
             ServerHost = _serverHostText.Text.Trim(),
             LoginPort = int.TryParse(_loginPortText.Text, out var port) ? port : 2106,
+            GamePort = int.TryParse(_gamePortText.Text, out var gamePort) ? gamePort : 7777,
             ServerId = int.TryParse(_serverIdText.Text, out var serverId) ? serverId : 1
+            ,
+            ProtocolVersion = int.TryParse(_protocolText.Text, out var protocolVersion) ? protocolVersion : 746,
+            CharacterSlot = int.TryParse(_characterSlotText.Text, out var slot) ? slot : 0
         };
 
         _accounts.Add(profile);
@@ -190,6 +257,82 @@ public sealed class MainForm : Form
 
         _usernameText.Clear();
         _passwordText.Clear();
+    }
+
+    private L2MobiusConnection GetOrCreateSession(AccountProfile account)
+    {
+        if (_session is null)
+        {
+            _session = new L2MobiusConnection(account);
+            _session.MessageReceived += AppendLog;
+            _session.CharactersReceived += names => AppendLog($"Character candidates: {string.Join(", ", names)}");
+            _session.CharacterListReceived += OnCharacterListReceived;
+            _session.StatusChanged += UpdateStatus;
+        }
+
+        return _session;
+    }
+
+    private void OnCharacterListReceived(IReadOnlyList<CharacterSelectionEntry> characters)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action<IReadOnlyList<CharacterSelectionEntry>>(OnCharacterListReceived), characters);
+            return;
+        }
+
+        _characters.Clear();
+        foreach (var character in characters)
+        {
+            _characters.Add(character);
+        }
+
+        var active = characters.FirstOrDefault(c => c.IsActive) ?? characters.FirstOrDefault();
+        if (active is not null)
+        {
+            var index = _characters.IndexOf(active);
+            if (index >= 0)
+            {
+                _characterCombo.SelectedIndex = index;
+            }
+
+            _characterSlotText.Text = active.Slot.ToString();
+        }
+    }
+
+    private void CharacterCombo_SelectedIndexChanged(object? sender, EventArgs e)
+    {
+        if (_characterCombo.SelectedItem is CharacterSelectionEntry character)
+        {
+            _characterSlotText.Text = character.Slot.ToString();
+            if (_accountList.SelectedItem is AccountProfile selected)
+            {
+                selected.CharacterSlot = character.Slot;
+            }
+        }
+    }
+
+    private void UpdateStatus(SessionStatus status)
+    {
+        if (InvokeRequired)
+        {
+            BeginInvoke(new Action<SessionStatus>(UpdateStatus), status);
+            return;
+        }
+
+        var loginOn = status.Stage == ConnectionStage.LoginConnected || status.LoginAuthenticated;
+        var gameOn = status.Stage == ConnectionStage.GameConnected || status.GameAuthenticated;
+        var worldOn = status.InWorld;
+
+        SetStatusLabel(_loginStateLabel, "Login", loginOn);
+        SetStatusLabel(_gameStateLabel, "Game", gameOn);
+        SetStatusLabel(_worldStateLabel, "World", worldOn);
+    }
+
+    private static void SetStatusLabel(Label label, string title, bool isOn)
+    {
+        label.Text = $"{title}: {(isOn ? "ON" : "OFF")}";
+        label.ForeColor = isOn ? Color.LawnGreen : Color.LightGray;
     }
 
     private async void ConnectButton_Click(object? sender, EventArgs e)
@@ -202,13 +345,14 @@ public sealed class MainForm : Form
 
         try
         {
-            using var client = new L2MobiusConnection(selected);
-            client.MessageReceived += AppendLog;
-            await client.ConnectAsync();
-            await client.SendLoginRequestAsync();
-            AppendLog("Login request sent. Waiting for server response...");
-            await Task.Delay(4000);
-            AppendLog("Connection test complete. The socket is ready to be expanded with a full game protocol parser.");
+            _session?.Dispose();
+            _session = null;
+            _characters.Clear();
+
+            var session = GetOrCreateSession(selected);
+            await session.ConnectLoginAsync();
+            AppendLog("Connected to login server. Waiting for INIT/GG_AUTH/LoginOk/PlayOk packet chain.");
+            AppendLog("When PlayOk arrives, click List Characters to open game connection and auth.");
         }
         catch (Exception ex)
         {
@@ -216,7 +360,7 @@ public sealed class MainForm : Form
         }
     }
 
-    private async void PingButton_Click(object? sender, EventArgs e)
+    private async void ListCharactersButton_Click(object? sender, EventArgs e)
     {
         if (_accountList.SelectedItem is not AccountProfile selected)
         {
@@ -226,19 +370,18 @@ public sealed class MainForm : Form
 
         try
         {
-            using var client = new L2MobiusConnection(selected);
-            client.MessageReceived += AppendLog;
-            await client.ConnectAsync();
-            await client.SendPingAsync();
-            await Task.Delay(1500);
+            var session = GetOrCreateSession(selected);
+            await session.ConnectGameAsync();
+            await session.SendGameAuthAsync();
+            AppendLog("Game protocol/auth sent. Wait for CharSelectInfo (0x13).");
         }
         catch (Exception ex)
         {
-            AppendLog($"Ping failed: {ex.Message}");
+            AppendLog($"Character list request failed: {ex.Message}");
         }
     }
 
-    private async void SelectServerButton_Click(object? sender, EventArgs e)
+    private async void EnterGameButton_Click(object? sender, EventArgs e)
     {
         if (_accountList.SelectedItem is not AccountProfile selected)
         {
@@ -248,17 +391,29 @@ public sealed class MainForm : Form
 
         try
         {
-            using var client = new L2MobiusConnection(selected);
-            client.MessageReceived += AppendLog;
-            await client.ConnectAsync();
-            await client.SendSelectServerAsync();
-            AppendLog("Server selection packet sent.");
-            await Task.Delay(1500);
+            var session = GetOrCreateSession(selected);
+            await session.ConnectGameAsync();
+            var slot = selected.CharacterSlot;
+            if (_characterCombo.SelectedItem is CharacterSelectionEntry character)
+            {
+                slot = character.Slot;
+            }
+
+            await session.SendSelectCharacterAsync(slot);
+            AppendLog($"Character select sent for slot {slot}. EnterWorld will be sent after CharSelected.");
         }
         catch (Exception ex)
         {
-            AppendLog($"Server selection failed: {ex.Message}");
+            AppendLog($"Character select failed: {ex.Message}");
         }
+    }
+
+    private void DisconnectButton_Click(object? sender, EventArgs e)
+    {
+        _session?.Dispose();
+        _session = null;
+        _characters.Clear();
+        AppendLog("Session disconnected.");
     }
 
     private void AppendLog(string message)

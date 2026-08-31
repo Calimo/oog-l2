@@ -4,31 +4,174 @@ namespace OogL2Client.Networking;
 
 public static class L2MobiusPacketBuilder
 {
+    // Login server opcodes.
+    public const byte AuthGameGuardOpcode = 0x07;
+    public const byte AuthLoginOpcode = 0x00;
+    public const byte RequestPlayOpcode = 0x02;
+    public const byte RequestServerListOpcode = 0x05;
+
+    // Game server opcodes.
+    public const byte GameProtocolVersionOpcode = 0x00;
+    public const byte GameAuthLoginOpcode = 0x08;
+    public const byte GameEnterWorldOpcode = 0x03;
+    public const byte GameCharacterSelectOpcode = 0x0D;
+
+    // Incoming key packet / char select info for logging/parsing.
+    public const byte KeyPacketOpcode = 0x00;
+    public const byte CharSelectInfoOpcode = 0x13;
+    public const byte PingOpcode = 0x7F;
+
+    public static byte[] BuildAuthGameGuardPayload(int sessionId)
+    {
+        var body = new List<byte> { AuthGameGuardOpcode };
+        body.AddRange(BitConverter.GetBytes(sessionId));
+        body.AddRange(new byte[16]);
+        return body.ToArray();
+    }
+
+    public static byte[] BuildAuthGameGuardRequest(int sessionId)
+    {
+        return BuildPacket(BuildAuthGameGuardPayload(sessionId));
+    }
+
+    public static byte[] BuildAuthLoginPayload(byte[] encryptedRsaBlock)
+    {
+        if (encryptedRsaBlock.Length != 128)
+        {
+            throw new ArgumentException("Encrypted RSA block must be exactly 128 bytes.", nameof(encryptedRsaBlock));
+        }
+
+        var body = new List<byte> { AuthLoginOpcode };
+        body.AddRange(encryptedRsaBlock);
+        return body.ToArray();
+    }
+
     public static byte[] BuildAuthLoginRequest(string username, string password)
     {
-        var payload = Encoding.ASCII.GetBytes($"{username}\0{password}\0");
-        return BuildPacket(0x01, payload);
+        var rsaBlock = BuildAuthLoginCredentialBlock(username, password);
+        return BuildPacket(BuildAuthLoginPayload(rsaBlock));
+    }
+
+    public static byte[] BuildAuthLoginCredentialBlock(string username, string password)
+    {
+        // Mobius login expects a 128-byte RSA block.
+        // Username/password are read from offsets 94 and 108 after RSA decrypt.
+        var rsaBlock = new byte[128];
+
+        WriteFixedAscii(rsaBlock, 94, 14, username);
+        WriteFixedAscii(rsaBlock, 108, 16, password);
+        return rsaBlock;
+    }
+
+    public static byte[] BuildAuthLoginRequest(byte[] encryptedRsaBlock)
+    {
+        return BuildPacket(BuildAuthLoginPayload(encryptedRsaBlock));
     }
 
     public static byte[] BuildSelectServerRequest(int serverId)
     {
-        var payload = BitConverter.GetBytes(serverId);
-        return BuildPacket(0x02, payload);
+        return BuildRequestPlay(serverId);
+    }
+
+    public static byte[] BuildRequestServerList()
+    {
+        return BuildRequestServerList(0, 0);
+    }
+
+    public static byte[] BuildRequestServerList(int loginKey1, int loginKey2)
+    {
+        var body = new List<byte> { RequestServerListOpcode };
+        body.AddRange(BitConverter.GetBytes(loginKey1));
+        body.AddRange(BitConverter.GetBytes(loginKey2));
+        return BuildPacket(body.ToArray());
+    }
+
+    public static byte[] BuildRequestPlay(int serverId)
+    {
+        return BuildRequestPlay(serverId, 0, 0);
+    }
+
+    public static byte[] BuildRequestPlay(int serverId, int loginKey1, int loginKey2)
+    {
+        var body = new List<byte> { RequestPlayOpcode };
+        body.AddRange(BitConverter.GetBytes(loginKey1));
+        body.AddRange(BitConverter.GetBytes(loginKey2));
+        body.Add((byte)serverId);
+        return BuildPacket(body.ToArray());
+    }
+
+    public static byte[] BuildGameProtocolVersion(int protocolVersion)
+    {
+        var body = new List<byte> { GameProtocolVersionOpcode };
+        body.AddRange(BitConverter.GetBytes(protocolVersion));
+        return BuildPacket(body.ToArray());
+    }
+
+    public static byte[] BuildGameAuthLogin(string loginName, int playKey1, int playKey2, int loginKey1, int loginKey2)
+    {
+        var body = new List<byte> { GameAuthLoginOpcode };
+        WriteNullTerminatedL2String(body, loginName.ToLowerInvariant());
+        body.AddRange(BitConverter.GetBytes(playKey2));
+        body.AddRange(BitConverter.GetBytes(playKey1));
+        body.AddRange(BitConverter.GetBytes(loginKey1));
+        body.AddRange(BitConverter.GetBytes(loginKey2));
+        return BuildPacket(body.ToArray());
+    }
+
+    public static byte[] BuildGameCharacterSelect(int slot)
+    {
+        var body = new List<byte> { GameCharacterSelectOpcode };
+        body.AddRange(BitConverter.GetBytes(slot));
+        body.AddRange(BitConverter.GetBytes((short)0));
+        body.AddRange(BitConverter.GetBytes(0));
+        body.AddRange(BitConverter.GetBytes(0));
+        body.AddRange(BitConverter.GetBytes(0));
+        return BuildPacket(body.ToArray());
+    }
+
+    public static byte[] BuildGameEnterWorld()
+    {
+        var body = new List<byte> { GameEnterWorldOpcode };
+        body.AddRange(new byte[104]);
+        return BuildPacket(body.ToArray());
     }
 
     public static byte[] BuildPingPacket()
     {
-        return BuildPacket(0x7F, Array.Empty<byte>());
+        return BuildPacket(new[] { PingOpcode });
     }
 
-    public static byte[] BuildPacket(byte opCode, byte[] payload)
+    public static byte[] BuildPacket(byte[] body)
     {
-        var packet = new List<byte>();
-
-        packet.Add(0x00);
-        packet.Add(opCode);
-        packet.AddRange(payload);
-
+        var packet = new List<byte>(body.Length + 2);
+        var packetLength = (ushort)(body.Length + 2);
+        packet.AddRange(BitConverter.GetBytes(packetLength));
+        packet.AddRange(body);
         return packet.ToArray();
+    }
+
+    public static byte GetOpcode(byte[] framedPacket)
+    {
+        if (framedPacket.Length < 3)
+        {
+            throw new ArgumentException("Packet is too short.", nameof(framedPacket));
+        }
+
+        return framedPacket[2];
+    }
+
+    private static void WriteFixedAscii(byte[] target, int offset, int maxLength, string value)
+    {
+        var bytes = Encoding.ASCII.GetBytes(value);
+        var count = Math.Min(maxLength, bytes.Length);
+        Array.Copy(bytes, 0, target, offset, count);
+    }
+
+    private static void WriteNullTerminatedL2String(List<byte> buffer, string value)
+    {
+        var bytes = Encoding.Unicode.GetBytes(value);
+        buffer.AddRange(bytes);
+        buffer.Add(0x00);
+        buffer.Add(0x00);
     }
 }
