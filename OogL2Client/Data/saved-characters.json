@@ -1,0 +1,18 @@
+[
+  {
+    "Username": "ws",
+    "Password": "ws",
+    "ServerHost": "127.0.0.1",
+    "LoginPort": 2106,
+    "GamePort": 7777,
+    "ServerId": 2,
+    "ProtocolVersion": 746,
+    "CharacterSlot": 0,
+    "CharacterName": "WS",
+    "CharacterLevel": 47,
+    "CharacterClassId": 57,
+    "CharacterClassName": "Warsmith",
+    "ServerName": "Local Mobius",
+    "DisplayText": "WS | Lv 47 | Warsmith | ws | Local Mobius"
+  }
+]

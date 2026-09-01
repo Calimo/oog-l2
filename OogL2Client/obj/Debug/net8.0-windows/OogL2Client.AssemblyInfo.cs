@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("OogL2Client")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8f91fd95c4f31ba7743c59966ee0f1f47f8ed9ec")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7483078d7c3b8e08af3e5f3716ac13ea3416bc41")]
 [assembly: System.Reflection.AssemblyProductAttribute("OogL2Client")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OogL2Client")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

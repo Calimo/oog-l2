@@ -18,10 +18,10 @@ public static class L2MobiusPacketBuilder
 
     // Common in-game interaction opcodes used by L2-style clients.
     public const byte MoveToLocationOpcode = 0x01;
-    public const byte AttackOpcode = 0x02;
-    public const byte UseSkillOpcode = 0x0A;
+    public const byte AttackOpcode = 0x0A;
+    public const byte UseSkillOpcode = 0x2F;
     public const byte UseItemOpcode = 0x12;
-    public const byte ActionOpcode = 0x15;
+    public const byte ActionOpcode = 0x04;
     public const byte RequestTargetOpcode = 0x18;
     public const byte AssistTargetOpcode = 0x1C;
     public const byte StopMoveOpcode = 0x1E;
@@ -156,14 +156,24 @@ public static class L2MobiusPacketBuilder
         return BuildGameInteractionPacket(StopMoveOpcode, 0);
     }
 
-    public static byte[] BuildAttack(int targetObjectId)
+    public static byte[] BuildAttack(int targetObjectId, int originX = 0, int originY = 0, int originZ = 0, byte attackType = 0)
     {
-        return BuildGameInteractionPacket(AttackOpcode, targetObjectId, 0, 0, 0);
+        var body = new List<byte> { AttackOpcode };
+        body.AddRange(BitConverter.GetBytes(targetObjectId));
+        body.AddRange(BitConverter.GetBytes(originX));
+        body.AddRange(BitConverter.GetBytes(originY));
+        body.AddRange(BitConverter.GetBytes(originZ));
+        body.Add(attackType);
+        return BuildPacket(body.ToArray());
     }
 
-    public static byte[] BuildUseSkill(int skillId, int targetObjectId, int ctrlPressed = 0, int shiftPressed = 0)
+    public static byte[] BuildUseSkill(int skillId, int ctrlPressed = 0, int shiftPressed = 0)
     {
-        return BuildGameInteractionPacket(UseSkillOpcode, skillId, targetObjectId, ctrlPressed, shiftPressed, 0, 0);
+        var body = new List<byte> { UseSkillOpcode };
+        body.AddRange(BitConverter.GetBytes(skillId));
+        body.AddRange(BitConverter.GetBytes(ctrlPressed));
+        body.Add((byte)(shiftPressed != 0 ? 1 : 0));
+        return BuildPacket(body.ToArray());
     }
 
     public static byte[] BuildUseItem(int objectId, int itemId, int targetObjectId = 0, int itemCount = 1)
@@ -171,14 +181,20 @@ public static class L2MobiusPacketBuilder
         return BuildGameInteractionPacket(UseItemOpcode, objectId, itemId, targetObjectId, itemCount, 0, 0);
     }
 
-    public static byte[] BuildAction(int targetObjectId, int actionId, int actionType = 0)
+    public static byte[] BuildAction(int targetObjectId, int originX = 0, int originY = 0, int originZ = 0, byte actionId = 0)
     {
-        return BuildGameInteractionPacket(ActionOpcode, targetObjectId, actionId, actionType, 0, 0, 0);
+        var body = new List<byte> { ActionOpcode };
+        body.AddRange(BitConverter.GetBytes(targetObjectId));
+        body.AddRange(BitConverter.GetBytes(originX));
+        body.AddRange(BitConverter.GetBytes(originY));
+        body.AddRange(BitConverter.GetBytes(originZ));
+        body.Add(actionId);
+        return BuildPacket(body.ToArray());
     }
 
     public static byte[] BuildRequestTarget(int targetObjectId)
     {
-        return BuildGameInteractionPacket(RequestTargetOpcode, targetObjectId, 0, 0, 0);
+        return BuildAction(targetObjectId, actionId: 0);
     }
 
     public static byte[] BuildAssistTarget(int targetObjectId)

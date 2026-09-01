@@ -30,7 +30,7 @@ public static class WorldPacketParser
             NpcInfoOpcode => TryApplyNpcInfo(worldState, payload, out result),
             CharInfoOpcode => TryApplyCharInfo(worldState, payload, selfObjectId, selfName, out result),
             MagicSkillUseOpcode => TryApplySkillUse(worldState, payload, out result),
-            _ => false
+            _ => TryApplyHeuristicPlayerInfo(opcode, worldState, payload, selfObjectId, selfName, out result)
         };
     }
 
@@ -187,9 +187,10 @@ public static class WorldPacketParser
         };
 
         obj.Type = isAttackable == 1 ? WorldObjectType.Monster : WorldObjectType.NPC;
+        obj.TemplateId = NormalizeNpcTemplateId(npcTemplateId);
         obj.Relation = obj.Type == WorldObjectType.Monster ? WorldObjectRelation.Enemy : WorldObjectRelation.Neutral;
         obj.Name = string.IsNullOrWhiteSpace(obj.Name)
-            ? (obj.Type == WorldObjectType.Monster ? $"Mob {npcTemplateId}" : $"Npc {npcTemplateId}")
+            ? (obj.Type == WorldObjectType.Monster ? "Monster" : "NPC")
             : obj.Name;
         obj.X = x;
         obj.Y = y;
@@ -201,6 +202,22 @@ public static class WorldPacketParser
 
         result = new WorldPacketApplyResult(true, true, false, $"NpcInfo: {objectId} at ({x}, {y}, {z})");
         return true;
+    }
+
+    private static int NormalizeNpcTemplateId(int rawNpcTemplateId)
+    {
+        if (rawNpcTemplateId == 0)
+        {
+            return 0;
+        }
+
+        var normalized = Math.Abs(rawNpcTemplateId);
+        if (normalized >= 1_000_000)
+        {
+            normalized -= 1_000_000;
+        }
+
+        return normalized;
     }
 
     private static bool TryApplyCharInfo(WorldState worldState, byte[] payload, int selfObjectId, string selfName, out WorldPacketApplyResult result)
@@ -215,14 +232,16 @@ public static class WorldPacketParser
 
         var candidateA = TryReadInt(payload, 17, out var objectIdA) ? objectIdA : 0;
         var candidateB = TryReadInt(payload, 13, out var objectIdB) ? objectIdB : 0;
-        var objectId = PickBestObjectId(candidateA, candidateB, selfObjectId, worldState);
+        var nameFromA = TryReadL2String(payload, 21);
+        var nameFromB = TryReadL2String(payload, 17);
+        var objectId = PickBestObjectId(candidateA, candidateB, selfObjectId, worldState, nameFromA, nameFromB);
         if (objectId <= 0)
         {
             return false;
         }
 
         var heading = TryReadInt(payload, 13, out var readHeading) ? readHeading : 0;
-        var name = TryReadL2String(payload, objectId == candidateA ? 21 : 17);
+        var name = objectId == candidateA ? nameFromA : nameFromB;
         if (string.IsNullOrWhiteSpace(name))
         {
             name = TryReadL2String(payload, 21);
@@ -319,7 +338,68 @@ public static class WorldPacketParser
         return true;
     }
 
-    private static int PickBestObjectId(int first, int second, int selfObjectId, WorldState worldState)
+    private static bool TryApplyHeuristicPlayerInfo(byte opcode, WorldState worldState, byte[] payload, int selfObjectId, string selfName, out WorldPacketApplyResult result)
+    {
+        result = new WorldPacketApplyResult(false, false, false, string.Empty);
+
+        // Fallback for protocol variants where player info uses different opcodes than 0x31/0x04.
+        if (!TryReadInt(payload, 1, out var x) ||
+            !TryReadInt(payload, 5, out var y) ||
+            !TryReadInt(payload, 9, out var z))
+        {
+            return false;
+        }
+
+        var objectId = TryReadInt(payload, 17, out var idA) && idA > 0 ? idA :
+                       TryReadInt(payload, 13, out var idB) && idB > 0 ? idB : 0;
+        if (objectId <= 0)
+        {
+            return false;
+        }
+
+        var candidateName = TryReadL2String(payload, 21);
+        if (!LooksLikeCharacterName(candidateName))
+        {
+            candidateName = TryReadL2String(payload, 25);
+        }
+
+        var looksSelf = objectId == selfObjectId;
+        var nameMatchesSelf = !string.IsNullOrWhiteSpace(selfName) &&
+                              string.Equals(candidateName, selfName, StringComparison.OrdinalIgnoreCase);
+        if (!looksSelf && !nameMatchesSelf && !LooksLikeCharacterName(candidateName))
+        {
+            return false;
+        }
+
+        var obj = worldState.Get(objectId) ?? new WorldObject
+        {
+            ObjectId = objectId,
+            IsVisible = true
+        };
+
+        obj.Type = WorldObjectType.Player;
+        obj.Name = string.IsNullOrWhiteSpace(candidateName) ? obj.Name : candidateName;
+        obj.X = x;
+        obj.Y = y;
+        obj.Z = z;
+        obj.IsVisible = true;
+        obj.LastSeenUtc = DateTime.UtcNow;
+        obj.Relation = looksSelf || nameMatchesSelf ? WorldObjectRelation.Self : WorldObjectRelation.Friendly;
+
+        if (obj.Relation == WorldObjectRelation.Self)
+        {
+            worldState.SetSelf(obj);
+        }
+        else
+        {
+            worldState.Upsert(obj);
+        }
+
+        result = new WorldPacketApplyResult(true, true, false, $"PlayerInfoFallback 0x{opcode:X2}: {obj.Name} ({objectId}) at ({x}, {y}, {z})");
+        return true;
+    }
+
+    private static int PickBestObjectId(int first, int second, int selfObjectId, WorldState worldState, string firstName, string secondName)
     {
         if (selfObjectId > 0)
         {
@@ -332,6 +412,18 @@ public static class WorldPacketParser
             {
                 return second;
             }
+        }
+
+        var firstLooksValid = first > 0 && LooksLikeCharacterName(firstName);
+        var secondLooksValid = second > 0 && LooksLikeCharacterName(secondName);
+        if (firstLooksValid && !secondLooksValid)
+        {
+            return first;
+        }
+
+        if (secondLooksValid && !firstLooksValid)
+        {
+            return second;
         }
 
         if (first > 0 && worldState.Get(first) is not null)
@@ -350,6 +442,21 @@ public static class WorldPacketParser
         }
 
         return second > 0 ? second : 0;
+    }
+
+    private static bool LooksLikeCharacterName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return false;
+        }
+
+        if (name.Length < 2 || name.Length > 24)
+        {
+            return false;
+        }
+
+        return name.All(c => char.IsLetterOrDigit(c) || c is '_' or '-' or ' ' or '\'' or '.');
     }
 
     private static bool TryReadInt(byte[] payload, int offset, out int value)

@@ -22,7 +22,7 @@ public sealed class MinimapRenderer
         _tileWorldSize = Math.Max(1024, tileWorldSize);
     }
 
-    public Bitmap Render(WorldState worldState, int mapX, int mapY, int viewportWidth = 300, int viewportHeight = 300, int radius = 2000)
+    public Bitmap Render(WorldState worldState, int mapX, int mapY, int viewportWidth = 300, int viewportHeight = 300, int radius = 2000, int targetObjectId = 0)
     {
         var canvas = new Bitmap(viewportWidth, viewportHeight, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
 
@@ -42,6 +42,8 @@ public sealed class MinimapRenderer
 
         var centerX = viewportWidth / 2;
         var centerY = viewportHeight / 2;
+        int? targetPx = null;
+        int? targetPy = null;
 
         foreach (var obj in worldState.Nearby(self.X, self.Y, radius))
         {
@@ -71,6 +73,43 @@ public sealed class MinimapRenderer
 
             using var pen = new Pen(color, 2f);
             g.DrawEllipse(pen, (float)px - 2f, (float)py - 2f, 4f, 4f);
+
+            if (targetObjectId > 0 && obj.ObjectId == targetObjectId)
+            {
+                targetPx = px;
+                targetPy = py;
+            }
+        }
+
+        WorldObject? target = null;
+        if (targetObjectId > 0)
+        {
+            target = worldState.Get(targetObjectId);
+            if (target is not null)
+            {
+                var tdx = target.X - self.X;
+                var tdy = target.Y - self.Y;
+                var tpx = centerX + tdx / 10;
+                var tpy = centerY + tdy / 10;
+                if (tpx >= 0 && tpx < viewportWidth && tpy >= 0 && tpy < viewportHeight)
+                {
+                    targetPx = tpx;
+                    targetPy = tpy;
+                }
+            }
+        }
+
+        if (targetPx.HasValue && targetPy.HasValue)
+        {
+            using var targetPen = new Pen(Color.Fuchsia, 2.5f);
+            g.DrawEllipse(targetPen, targetPx.Value - 8, targetPy.Value - 8, 16, 16);
+            g.DrawLine(targetPen, targetPx.Value - 10, targetPy.Value, targetPx.Value + 10, targetPy.Value);
+            g.DrawLine(targetPen, targetPx.Value, targetPy.Value - 10, targetPx.Value, targetPy.Value + 10);
+        }
+
+        if (targetObjectId > 0)
+        {
+            DrawTargetBadge(g, targetObjectId, target);
         }
 
         using (var selfPen = new Pen(Color.White, 2.5f))
@@ -80,6 +119,27 @@ public sealed class MinimapRenderer
         }
 
         return canvas;
+    }
+
+    private static void DrawTargetBadge(Graphics g, int targetObjectId, WorldObject? target)
+    {
+        var targetName = string.IsNullOrWhiteSpace(target?.Name) ? $"Object {targetObjectId}" : target!.Name;
+        var hpText = target is null
+            ? "-"
+            : target.MaxHp > 0
+                ? $"{target.Hp}/{target.MaxHp}"
+                : target.Hp > 0 ? target.Hp.ToString(CultureInfo.InvariantCulture) : "-";
+        var text = $"Target: {targetName} | HP {hpText}";
+
+        using var font = new Font(FontFamily.GenericSansSerif, 9f, FontStyle.Bold);
+        var size = g.MeasureString(text, font);
+        var badge = new RectangleF(8, 8, size.Width + 14, size.Height + 8);
+        using var bg = new SolidBrush(Color.FromArgb(160, 0, 0, 0));
+        using var border = new Pen(Color.Fuchsia, 1.5f);
+        using var textBrush = new SolidBrush(Color.White);
+        g.FillRectangle(bg, badge);
+        g.DrawRectangle(border, badge.X, badge.Y, badge.Width, badge.Height);
+        g.DrawString(text, font, textBrush, badge.X + 7, badge.Y + 4);
     }
 
     private void DrawMapTiles(Graphics g, int mapX, int mapY, int viewportWidth, int viewportHeight, int radius)

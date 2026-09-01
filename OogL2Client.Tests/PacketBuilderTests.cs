@@ -34,7 +34,7 @@ public class PacketBuilderTests
     public void BuildGameInteractionPackets_ShouldProduceStructuredPayloads()
     {
         var movePacket = L2MobiusPacketBuilder.BuildMoveToLocation(101, 202, 303, 0, 0, 0);
-        var skillPacket = L2MobiusPacketBuilder.BuildUseSkill(1001, 42, 0, 0);
+        var skillPacket = L2MobiusPacketBuilder.BuildUseSkill(1001, 0, 0);
         var itemPacket = L2MobiusPacketBuilder.BuildUseItem(77, 1000, 42);
         var actionPacket = L2MobiusPacketBuilder.BuildAction(42, 10);
         var assistPacket = L2MobiusPacketBuilder.BuildAssistTarget(42);

@@ -16,6 +16,7 @@ public enum ConnectionStage
 
 public sealed record SessionStatus(ConnectionStage Stage, bool LoginAuthenticated, bool GameAuthenticated, bool InWorld);
 public sealed record PlayerLocationUpdate(int ObjectId, string Name, int X, int Y, int Z, int Heading, byte Opcode, string SourceSummary);
+public sealed record TargetUpdate(int ObjectId, string Name, int? Hp, int? MaxHp, byte Opcode, string SourceSummary);
 
 public sealed class L2MobiusConnection : IDisposable
 {
@@ -48,6 +49,10 @@ public sealed class L2MobiusConnection : IDisposable
     private int _selectedCharacterObjectId;
     private string _selectedCharacterName = string.Empty;
     private readonly WorldState _worldState = new();
+    private readonly Dictionary<int, LearnedSkillEntry> _learnedSkills = new();
+    private int _currentTargetObjectId;
+    private int? _currentTargetHp;
+    private int? _currentTargetMaxHp;
     private int? _lastSelfX;
     private int? _lastSelfY;
     private int? _lastSelfZ;
@@ -59,6 +64,8 @@ public sealed class L2MobiusConnection : IDisposable
     public event Action<SessionStatus>? StatusChanged;
     public event Action<WorldPacketApplyResult>? WorldStateUpdated;
     public event Action<PlayerLocationUpdate>? PlayerLocationUpdated;
+    public event Action<IReadOnlyList<LearnedSkillEntry>>? LearnedSkillsUpdated;
+    public event Action<TargetUpdate>? TargetUpdated;
 
     public L2MobiusConnection(AccountProfile account)
     {
@@ -68,6 +75,13 @@ public sealed class L2MobiusConnection : IDisposable
     public bool IsConnected => _client.Connected && _stream is not null;
     public ConnectionStage Stage { get; private set; } = ConnectionStage.Disconnected;
     public WorldState WorldState => _worldState;
+    public bool IsLoginAuthenticated => _loginAuthenticated;
+    public bool IsGameAuthenticated => _gameAuthenticated;
+    public bool IsInWorld => _worldEnteredConfirmed;
+    public bool HasPlayKeys => _playKey1 != 0 || _playKey2 != 0;
+    public IReadOnlyList<LearnedSkillEntry> LearnedSkills => _learnedSkills.Values.OrderBy(s => s.SkillId).ToList();
+    public int CurrentTargetObjectId => _currentTargetObjectId;
+    public WorldObject? CurrentTarget => _currentTargetObjectId > 0 ? _worldState.Get(_currentTargetObjectId) : null;
 
     public Task ConnectAsync()
     {
@@ -256,7 +270,11 @@ public sealed class L2MobiusConnection : IDisposable
             throw new InvalidOperationException("Client is not connected.");
         }
 
-        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAttack(targetObjectId));
+        var self = _worldState.Self;
+        var originX = self?.X ?? 0;
+        var originY = self?.Y ?? 0;
+        var originZ = self?.Z ?? 0;
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAttack(targetObjectId, originX, originY, originZ));
         await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
     }
 
@@ -267,7 +285,7 @@ public sealed class L2MobiusConnection : IDisposable
             throw new InvalidOperationException("Client is not connected.");
         }
 
-        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildUseSkill(skillId, targetObjectId, ctrlPressed, shiftPressed));
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildUseSkill(skillId, ctrlPressed, shiftPressed));
         await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
     }
 
@@ -289,7 +307,11 @@ public sealed class L2MobiusConnection : IDisposable
             throw new InvalidOperationException("Client is not connected.");
         }
 
-        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAction(targetObjectId, actionId, actionType));
+        var self = _worldState.Self;
+        var originX = self?.X ?? 0;
+        var originY = self?.Y ?? 0;
+        var originZ = self?.Z ?? 0;
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAction(targetObjectId, originX, originY, originZ, (byte)Math.Clamp(actionId, 0, 255)));
         await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
     }
 
@@ -300,7 +322,11 @@ public sealed class L2MobiusConnection : IDisposable
             throw new InvalidOperationException("Client is not connected.");
         }
 
-        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildRequestTarget(targetObjectId));
+        var self = _worldState.Self;
+        var originX = self?.X ?? 0;
+        var originY = self?.Y ?? 0;
+        var originZ = self?.Z ?? 0;
+        var payload = ExtractPayload(L2MobiusPacketBuilder.BuildAction(targetObjectId, originX, originY, originZ, 0));
         await SendPayloadAsync(payload, encryptLogin: false, encryptGame: true, cancellationToken);
     }
 
@@ -604,6 +630,31 @@ public sealed class L2MobiusConnection : IDisposable
             MessageReceived?.Invoke($"World entry confirmed by server packet 0x{opcode:X2}. Character is in-game server-side.");
         }
 
+        if (opcode == 0x29 && PacketParsing.TryParseTargetSelected(payload, out var selectedTargetId))
+        {
+            SetCurrentTarget(selectedTargetId, opcode, "TargetSelected");
+        }
+
+        if (opcode == 0xA6 && PacketParsing.TryParseMyTargetSelected(payload, out var mySelectedTargetId))
+        {
+            SetCurrentTarget(mySelectedTargetId, opcode, "MyTargetSelected");
+        }
+
+        if (opcode == 0x2A)
+        {
+            ClearCurrentTarget(opcode, "TargetUnselected");
+        }
+
+        if (opcode == 0x0E && PacketParsing.TryParseStatusUpdate(payload, out var statusUpdate))
+        {
+            ApplyStatusUpdate(statusUpdate, opcode);
+        }
+
+        if (opcode == 0x58)
+        {
+            HandleSkillListPacket(payload);
+        }
+
         if (WorldPacketParser.TryApply(_worldState, opcode, payload, _selectedCharacterObjectId, _selectedCharacterName, out var update) && update.Changed)
         {
             PromoteSelectedCharacterToSelfIfNeeded();
@@ -739,10 +790,96 @@ public sealed class L2MobiusConnection : IDisposable
         _selectedCharacterObjectId = 0;
         _selectedCharacterName = string.Empty;
         _worldState.Clear();
+        _learnedSkills.Clear();
+        _currentTargetObjectId = 0;
+        _currentTargetHp = null;
+        _currentTargetMaxHp = null;
         _lastSelfX = null;
         _lastSelfY = null;
         _lastSelfZ = null;
         _lastSelfHeading = null;
+    }
+
+    private void ApplyStatusUpdate(StatusUpdatePacket statusUpdate, byte opcode)
+    {
+        if (statusUpdate.ObjectId <= 0)
+        {
+            return;
+        }
+
+        var tracked = _worldState.Get(statusUpdate.ObjectId);
+        if (tracked is not null)
+        {
+            if (statusUpdate.CurrentHp.HasValue)
+            {
+                tracked.Hp = statusUpdate.CurrentHp.Value;
+            }
+
+            if (statusUpdate.MaxHp.HasValue)
+            {
+                tracked.MaxHp = statusUpdate.MaxHp.Value;
+            }
+
+            tracked.LastSeenUtc = DateTime.UtcNow;
+            _worldState.Upsert(tracked);
+        }
+
+        if (statusUpdate.ObjectId != _currentTargetObjectId)
+        {
+            return;
+        }
+
+        _currentTargetHp = statusUpdate.CurrentHp ?? _currentTargetHp;
+        _currentTargetMaxHp = statusUpdate.MaxHp ?? _currentTargetMaxHp;
+
+        var targetName = tracked?.Name;
+        if (string.IsNullOrWhiteSpace(targetName))
+        {
+            targetName = $"Object {_currentTargetObjectId}";
+        }
+
+        TargetUpdated?.Invoke(new TargetUpdate(_currentTargetObjectId, targetName, _currentTargetHp, _currentTargetMaxHp, opcode, "StatusUpdate"));
+    }
+
+    private void SetCurrentTarget(int targetObjectId, byte opcode, string source)
+    {
+        if (targetObjectId <= 0)
+        {
+            return;
+        }
+
+        _currentTargetObjectId = targetObjectId;
+        var target = _worldState.Get(targetObjectId);
+        _currentTargetHp = target?.Hp > 0 ? target.Hp : null;
+        _currentTargetMaxHp = target?.MaxHp > 0 ? target.MaxHp : null;
+        var name = string.IsNullOrWhiteSpace(target?.Name) ? $"Object {targetObjectId}" : target!.Name;
+        TargetUpdated?.Invoke(new TargetUpdate(targetObjectId, name, _currentTargetHp, _currentTargetMaxHp, opcode, source));
+    }
+
+    private void ClearCurrentTarget(byte opcode, string source)
+    {
+        _currentTargetObjectId = 0;
+        _currentTargetHp = null;
+        _currentTargetMaxHp = null;
+        TargetUpdated?.Invoke(new TargetUpdate(0, string.Empty, null, null, opcode, source));
+    }
+
+    private void HandleSkillListPacket(byte[] payload)
+    {
+        var skills = PacketParsing.ParseSkillList(payload);
+        if (skills.Count == 0)
+        {
+            return;
+        }
+
+        _learnedSkills.Clear();
+        foreach (var skill in skills)
+        {
+            _learnedSkills[skill.SkillId] = skill;
+        }
+
+        MessageReceived?.Invoke($"SkillList parsed: {_learnedSkills.Count} learned skill(s).");
+        LearnedSkillsUpdated?.Invoke(LearnedSkills);
     }
 
     private void PromoteSelectedCharacterToSelfIfNeeded()

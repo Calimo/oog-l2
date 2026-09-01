@@ -1,0 +1,11 @@
+[
+  {
+    "Name": "Local Mobius",
+    "ServerHost": "127.0.0.1",
+    "LoginPort": 2106,
+    "GamePort": 7777,
+    "ServerId": 1,
+    "ProtocolVersion": 746,
+    "DisplayText": "Local Mobius (127.0.0.1:2106/7777)"
+  }
+]

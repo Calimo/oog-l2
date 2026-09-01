@@ -3,6 +3,8 @@ using System.Text;
 namespace OogL2Client.Networking;
 
 public sealed record CharacterSelectionEntry(int Slot, string Name, int ObjectId, int ClassId, int Level, bool IsActive);
+public sealed record LearnedSkillEntry(int SkillId, int Level, bool IsPassive, bool IsDisabled);
+public sealed record StatusUpdatePacket(int ObjectId, int? CurrentHp, int? MaxHp);
 
 internal static class PacketParsing
 {
@@ -110,6 +112,115 @@ internal static class PacketParsing
         }
 
         return results;
+    }
+
+    public static IReadOnlyList<LearnedSkillEntry> ParseSkillList(byte[] payload)
+    {
+        if (payload.Length < 4 || payload[0] != 0x58)
+        {
+            return Array.Empty<LearnedSkillEntry>();
+        }
+
+        var count = BitConverter.ToInt32(payload, 1);
+        if (count <= 0 || count > 4096)
+        {
+            return Array.Empty<LearnedSkillEntry>();
+        }
+
+        const int firstEntryOffset = 5;
+        const int entrySize = 13;
+        var required = firstEntryOffset + (count * entrySize);
+        if (required > payload.Length)
+        {
+            return Array.Empty<LearnedSkillEntry>();
+        }
+
+        var skills = new List<LearnedSkillEntry>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var offset = firstEntryOffset + (i * entrySize);
+            var isPassive = BitConverter.ToInt32(payload, offset) != 0;
+            var level = BitConverter.ToInt32(payload, offset + 4);
+            var skillId = BitConverter.ToInt32(payload, offset + 8);
+            var isDisabled = payload[offset + 12] != 0;
+            if (skillId <= 0)
+            {
+                continue;
+            }
+
+            var normalizedLevel = level < 0 ? 0 : level;
+            skills.Add(new LearnedSkillEntry(skillId, normalizedLevel, isPassive, isDisabled));
+        }
+
+        return skills;
+    }
+
+    public static bool TryParseTargetSelected(byte[] payload, out int targetObjectId)
+    {
+        targetObjectId = 0;
+        if (payload.Length < 5 || payload[0] != 0x29)
+        {
+            return false;
+        }
+
+        targetObjectId = BitConverter.ToInt32(payload, 1);
+        return targetObjectId > 0;
+    }
+
+    public static bool TryParseMyTargetSelected(byte[] payload, out int targetObjectId)
+    {
+        targetObjectId = 0;
+        if (payload.Length < 5 || payload[0] != 0xA6)
+        {
+            return false;
+        }
+
+        targetObjectId = BitConverter.ToInt32(payload, 1);
+        return targetObjectId > 0;
+    }
+
+    public static bool TryParseStatusUpdate(byte[] payload, out StatusUpdatePacket status)
+    {
+        status = new StatusUpdatePacket(0, null, null);
+        if (payload.Length < 9 || payload[0] != 0x0E)
+        {
+            return false;
+        }
+
+        var objectId = BitConverter.ToInt32(payload, 1);
+        var count = BitConverter.ToInt32(payload, 5);
+        if (objectId <= 0 || count < 0 || count > 128)
+        {
+            return false;
+        }
+
+        var expectedLength = 9 + (count * 8);
+        if (expectedLength > payload.Length)
+        {
+            return false;
+        }
+
+        int? currentHp = null;
+        int? maxHp = null;
+        var offset = 9;
+        for (var i = 0; i < count; i++)
+        {
+            var attributeId = BitConverter.ToInt32(payload, offset);
+            var attributeValue = BitConverter.ToInt32(payload, offset + 4);
+            offset += 8;
+
+            if (attributeId == 9)
+            {
+                currentHp = attributeValue;
+            }
+            else if (attributeId == 10)
+            {
+                maxHp = attributeValue;
+            }
+        }
+
+        status = new StatusUpdatePacket(objectId, currentHp, maxHp);
+        return true;
     }
 
     private sealed class PacketReader

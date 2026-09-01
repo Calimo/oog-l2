@@ -85,6 +85,18 @@ public sealed class WorldState
         }
     }
 
+    public IReadOnlyList<WorldObject> VisibleObjectsSnapshot()
+    {
+        lock (_syncRoot)
+        {
+            return _objects.Values
+                .Where(o => o.IsVisible)
+                .OrderBy(o => o.Name)
+                .ThenBy(o => o.ObjectId)
+                .ToList();
+        }
+    }
+
     public void ClearExpired(TimeSpan maxAge)
     {
         lock (_syncRoot)

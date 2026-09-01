@@ -10,3 +10,105 @@
    at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 170
    at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
 
+[2026-08-31 17:52:29] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 17:52:29] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 17:56:34] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 17:56:34] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 17:57:01] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 17:57:01] System.NullReferenceException: Object reference not set to an instance of an object.
+   at OogL2Client.MainForm.RefreshSavedCharacterDropdown(SavedCharacterProfile preferredSelection) in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 421
+   at OogL2Client.MainForm.LoadSavedCharacters() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 409
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 69
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 18:02:27] System.InvalidOperationException: SplitterDistance must be between Panel1MinSize and Width - Panel2MinSize.
+   at System.Windows.Forms.SplitContainer.set_SplitterDistance(Int32 value)
+   at System.Windows.Forms.SplitContainer.ApplyPanel2MinSize(Int32 value)
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 218
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 18:02:27] System.InvalidOperationException: SplitterDistance must be between Panel1MinSize and Width - Panel2MinSize.
+   at System.Windows.Forms.SplitContainer.set_SplitterDistance(Int32 value)
+   at System.Windows.Forms.SplitContainer.ApplyPanel2MinSize(Int32 value)
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 218
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 18:03:01] System.InvalidOperationException: SplitterDistance must be between Panel1MinSize and Width - Panel2MinSize.
+   at System.Windows.Forms.SplitContainer.set_SplitterDistance(Int32 value)
+   at System.Windows.Forms.SplitContainer.ApplyPanel2MinSize(Int32 value)
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 218
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 18:03:01] System.InvalidOperationException: SplitterDistance must be between Panel1MinSize and Width - Panel2MinSize.
+   at System.Windows.Forms.SplitContainer.set_SplitterDistance(Int32 value)
+   at System.Windows.Forms.SplitContainer.ApplyPanel2MinSize(Int32 value)
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 218
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:10:11] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:10:11] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:11:04] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:11:04] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:11:22] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+
+[2026-08-31 22:11:22] System.ArgumentOutOfRangeException: InvalidArgument=Value of '0' is not valid for 'SelectedIndex'. (Parameter 'value')
+Actual value was 0.
+   at System.Windows.Forms.ComboBox.set_SelectedIndex(Int32 value)
+   at OogL2Client.MainForm.PopulateSkillCombo() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 1179
+   at OogL2Client.MainForm..ctor() in E:\Projetos Git\oog-l2\OogL2Client\MainForm.cs:line 257
+   at OogL2Client.Program.Main() in E:\Projetos Git\oog-l2\OogL2Client\Program.cs:line 16
+

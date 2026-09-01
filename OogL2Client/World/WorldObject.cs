@@ -21,6 +21,7 @@ public enum WorldObjectRelation
 public class WorldObject
 {
     public int ObjectId { get; set; }
+    public int TemplateId { get; set; }
     public string Name { get; set; } = string.Empty;
     public WorldObjectType Type { get; set; } = WorldObjectType.Unknown;
     public WorldObjectRelation Relation { get; set; } = WorldObjectRelation.Unknown;
